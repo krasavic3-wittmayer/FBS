@@ -3,15 +3,19 @@ import wave
 import numpy as np
 
 sample_rate = 48_000
-duration = 3.0
+duration = 10.0
 
 t = np.arange(int(sample_rate * duration)) / sample_rate
 
-# Impulse
 flash = (
-    1.0 * np.exp(-t / 0.015)
-    - 0.35 * np.exp(-t / 0.08)
+    1.0 * np.exp(-t / 0.03) +
+    10.0 * np.exp(-t / 0.5) +
+    16.0 * np.exp(-t / 2.0) +
+    14.0 * np.exp(-t / 5.0) +
+    10.0 * np.exp(-t / 10.0)
 )
+
+flash /= np.max(np.abs(flash))
 
 # Normalize
 flash /= np.max(np.abs(flash))

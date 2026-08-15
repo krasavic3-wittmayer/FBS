@@ -4,7 +4,7 @@ from scipy.io import wavfile
 from scipy.signal import spectrogram
 from scipy.ndimage import uniform_filter1d
 
-sample_rate, audio = wavfile.read("./Experinmets/test.wav")
+sample_rate, audio = wavfile.read("./Experinmets/flash.wav")
 
 if audio.ndim > 1:
     audio = audio.mean(axis=1)
@@ -36,9 +36,9 @@ similarity = np.dot(a, b) / (
     np.linalg.norm(a) * np.linalg.norm(b)
 )
 
-#print(similarity)
-#plt.plot(times, fingerprint_smoothed)
-# plt.show()
+print(similarity)
+plt.plot(times, fingerprint_smoothed)
+plt.show()
 
 for shift in [0, 50, 100, 200, 500]:
     b = np.roll(a, shift)
