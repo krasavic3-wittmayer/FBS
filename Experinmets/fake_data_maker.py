@@ -10,8 +10,8 @@ def generate_fake_data():
     data = []
     for time in range(secs_in_day * 100):
         entry = {
-            "lat": random.uniform(-40, 40),
-            "lon": random.uniform(-90, 90),
+            "lat": random.uniform(-20, 20),
+            "lon": random.uniform(-50, 50),
             "time": time / 100 # 100 flashes per second
         }
         data.append(entry)

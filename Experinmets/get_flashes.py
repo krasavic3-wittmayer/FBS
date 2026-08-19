@@ -3,7 +3,7 @@ from pathlib import Path
 from math import radians, sqrt, cos
 import random
 
-filename = Path("~/Projects/FBS/Data/TestData/fake_data.json").expanduser()
+filename = Path("~/Projects/FBS/Data/TestData/fake_data_more.json").expanduser()
 
 close_flashes = []
 
@@ -27,8 +27,8 @@ while True:
     total_attempts += 1
 
     outpost = {
-        "lat": random.uniform(-40, 40),
-        "lon": random.uniform(-90, 90)
+        "lat": random.uniform(-20, 20),
+        "lon": random.uniform(-50, 50)
     }
 
     close_flashes = []
