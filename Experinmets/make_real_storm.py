@@ -28,17 +28,49 @@ class Storm:
 
 def generate_storms(t, storm_count):
     global time
-    time_of_storms = t
-    storms = [Storm.make_storm() for _ in range(storm_count)]
+
+    active_storms = [Storm.make_storm() for _ in range(storm_count)]
+    all_storms = active_storms.copy()
 
     while time < t:
-        end_times = [storm.end_time for storm in storms]
-        nearest_end_storm = min(end_times)
+        nearest_end_storm = min(
+            storm.end_time - time
+            for storm in active_storms
+        )
 
+        time += nearest_end_storm
 
-    return storms
+        if time > t:
+            break
 
-storms = generate_storms(24 * 60, 10)  # 24 hours in minutes
+        finished = [
+            storm for storm in active_storms
+            if storm.end_time <= time
+        ]
 
-for storm in storms:
-    print(storm.__repr__())
+        for storm in finished:
+            active_storms.remove(storm)
+
+        for _ in finished:
+            new_storm = Storm.make_storm()
+            active_storms.append(new_storm)
+            all_storms.append(new_storm)
+
+    return all_storms
+#
+#storms = generate_storms(24 * 60, 10)  # 24 hours in minutes
+#
+#for storm in storms:
+#    print(storm.__repr__())
+#
+#print(f"Total storms generated: {len(storms)}")
+#
+#total_storms = 0
+#
+#for i in range(1000):
+#    time = 0
+#    storms_test = generate_storms(24 * 60, 10)
+#    total_storms += len(storms_test)
+#
+#
+#print(f"Average storms generated over 1000 iterations: {total_storms / 1000}")
