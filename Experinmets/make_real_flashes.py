@@ -44,4 +44,4 @@ def generate_all_flashes(storms, storm_radius):
     return all_flashes
 
 #print(len(generate_storm_flashes(Storm.make_storm(), random.uniform(5, 20))))
-print(len(generate_all_flashes(storms, random.uniform(5, 20))))
+#print(len(generate_all_flashes(storms, random.uniform(5, 20))))
