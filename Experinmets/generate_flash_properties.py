@@ -38,6 +38,6 @@ def generate_flash_properties(
 
     return flash_amplitude, flash_delay
 
-testpost = Outpost(0, 0)
-testflash = Flash(0.1, 0.1, 0)
-print(generate_flash_properties(testflash, testpost))
+#testpost = Outpost(0, 0)
+#testflash = Flash(0.1, 0.1, 0)
+#print(generate_flash_properties(testflash, testpost))
