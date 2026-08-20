@@ -108,4 +108,4 @@ This project is best understood as an early-stage research prototype. It is focu
 
 ## License
 
-This project is distributed as-is for research and experimentation. See the repository license file if present for usage terms.
+FBS is licensed under the MIT License. See [LICENSE](LICENSE) for details.
