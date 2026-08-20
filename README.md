@@ -1,141 +1,111 @@
 # FBS — Find By Storm
 
-FBS is an experimental system for locating an audio recording of a
-thunderstorm using a global lightning strike dataset.
+FBS is a research project about a simple but challenging question:
 
-The goal is simple:
+> Can a thunderstorm recording be used to infer where and when the storm was occurring?
 
-> Given an audio recording containing thunder and a dataset of lightning
-> strikes, determine **where and when the recording was made**.
+The idea is to treat thunder as a signal that carries spatial and temporal information. A recording captured near a storm contains a pattern of delayed, attenuated, and overlapping thunder events. By modeling those events and comparing them to a dataset of lightning activity, the system aims to estimate the most likely location and time of the recording.
 
-## How it works
+## What the project is about
 
-FBS compares the acoustic fingerprint of a recording with patterns
-formed by lightning strikes in the dataset.
+This project explores the idea of acoustic storm localization.
 
-The planned pipeline is roughly:
+Instead of using GPS or a known reference point, it asks whether thunder itself can act as a fingerprint. The system turns recorded thunder into a compact acoustic signature and compares it against synthetic or historical lightning data. If the matching pattern is strong enough, the storm's origin can be inferred from the data.
+
+The broader goal is not just to detect thunder, but to reason about:
+
+- where lightning was active relative to the recorder
+- when thunder events occurred in sequence
+- how signal strength decays with distance
+- how a storm's acoustic footprint differs from location to location
+- how to search large candidate datasets efficiently
+
+## Core concept
+
+Lightning produces a highly distinctive acoustic pattern. The sound arrives at a microphone over time because different strikes are at different distances and directions, and each event is shaped by propagation through the atmosphere.
+
+FBS attempts to model this process in reverse:
 
 ```text
-Audio recording
+Thunder recording
       │
       ▼
-Spectrogram
+Spectral fingerprint extraction
       │
       ▼
-Acoustic fingerprint
+Comparison with lightning-event patterns
       │
-      ├─────────────────────┐
-      │                     │
-      ▼                     ▼
-Lightning dataset      Candidate locations
-      │                     │
-      └──────────┬──────────┘
-                 ▼
-          Similarity search
-                 │
-                 ▼
-          Estimated location
-             + timestamp
+      ▼
+Candidate storm locations and times
+      │
+      ▼
+Best-fit estimate
 ```
 
-The system uses the timing and relative strength of thunder events to
-compare the recording against known lightning activity.
+The project combines ideas from:
 
-Current status
+- signal processing
+- acoustics
+- geospatial modeling
+- time-series matching
+- probabilistic or similarity-based search
 
-🚧 Experimental / Work in Progress
+## Why this matters
 
-The project is currently focused on building a synthetic test environment
-and validating the core algorithms.
+Thunderstorm localization is useful in several contexts:
 
-Current components include:
+- understanding the geometry of a storm from a single recording
+- estimating sensor placement from acoustic evidence
+- studying atmospheric sound propagation
+- building better systems for environmental monitoring
+- exploring how much information is present in natural acoustic events
 
- Lightning test-data generator
- Geographic distance calculation
- Filtering lightning strikes by distance
- 30-minute recording window selection
- Synthetic lightning waveform generation
- Audio spectrogram generation
- Low-frequency audio fingerprinting
- Cosine similarity experiments
- Synthetic recording generation
- End-to-end localization
- Large-dataset optimization
- Spatial and temporal indexing
- GPU acceleration
- Real-world dataset testing
-Test data
+In other words, the project is less about audio classification and more about turning a natural sound into a spatial clue.
 
-The project uses generated lightning data for development and testing.
+## Research direction
 
-Large generated datasets are intentionally not included in the repository.
+FBS is deliberately framed as a prototype and a scientific exploration, not a turnkey product. The project investigates how well thunder recordings can be matched to lightning data under controlled conditions, and it tests the assumptions behind the approach.
 
-They are stored locally under:
+The work focuses on:
 
-Data/
+- generating realistic synthetic thunder and lightning scenarios
+- building acoustic fingerprints from thunder-like signals
+- comparing fingerprints against spatially distributed event data
+- filtering candidate windows and locations over time
+- scaling the search to larger datasets without losing the signal structure
 
-and are excluded using .gitignore.
+## Typical workflow
 
-The current test data can contain millions of synthetic lightning strikes
-and is used to simulate large-scale lightning datasets.
+A simplified version of the pipeline looks like this:
 
-Why?
+1. Create or load lightning event data.
+2. Model a storm region and the distribution of flashes.
+3. Generate thunder-like audio fingerprints from distances and timing.
+4. Extract a compact acoustic representation from a recording.
+5. Compare the fingerprint against likely lightning patterns.
+6. Rank candidate locations and times by similarity.
+7. Return the most plausible storm configuration.
 
-The idea behind FBS is to investigate whether a thunderstorm recording can
-be geographically localized by comparing its acoustic signature with
-known lightning activity.
+This is not meant to be a generic sound-matching system; it is a domain-specific attempt to infer storm geometry from thunder.
 
-If successful, the system should be able to take something like:
+## Repository intent
 
-recording.wav
-lightning_dataset
+This repository is a place to explore that hypothesis in code. It contains experiments for:
 
-and produce an estimate such as:
+- synthetic storm and flash generation
+- lightning-event modeling
+- waveform generation
+- spectrogram and fingerprint extraction
+- candidate filtering
+- similarity testing
+- data handling for larger geospatial datasets
 
-Latitude:  50.xxxx
-Longitude: 14.xxxx
-Time:      xx:xx:xx UTC
+The code is intentionally exploratory and aimed at validating the core idea, rather than serving as a finished application interface or a production-grade data pipeline.
 
-without being given the recording's location beforehand.
+## Status
 
-Technology
+This project is best understood as an early-stage research prototype. It is focused on testing the feasibility of the concept, experimenting with signal representations, and developing the matching logic that connects thunder recordings to storm activity.
 
-The project is currently written primarily in Python.
+## License
 
-Main technologies and libraries:
-
-Python
-NumPy
-SciPy
-Matplotlib
-WAV audio processing
-Spectrogram analysis
-Cosine similarity
-
-Future versions may use:
-
-SQLite / indexed data storage
-GPU acceleration
-Spatial indexing
-Vectorized numerical processing
-Development
-
-Clone the repository and create a virtual environment:
-
-git clone <repository-url>
-cd FBS
-
-
-python -m venv .venv
-source .venv/bin/activate
-
-Install dependencies:
-
-pip install -r requirements.txt
-Disclaimer
-
-FBS is an experimental project.
-
-The current datasets are synthetic and the localization algorithm is still
-under development. Results from the current implementation should not be
-considered accurate real-world lightning localization.
+This project is distributed as-is for research and experimentation. See the repository license file if present for usage terms.
