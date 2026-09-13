@@ -1,6 +1,8 @@
 import sqlite3
 from pathlib import Path
 
+import numpy as np
+
 DB_PATH = Path(__file__).parent / "flashes.db"
 
 
@@ -28,18 +30,23 @@ def create_db(flashes, path=DB_PATH):
     return conn
 
 
-def query_nearby(conn, outpost, box_deg=0.3):
-    """Bounding-box prefilter in SQL; exact radius filter stays in Python."""
-    return conn.execute(
-        """
-        SELECT lat, lon, time FROM flashes
-        WHERE lat BETWEEN ? AND ?
-          AND lon BETWEEN ? AND ?
-        """,
-        (
-            outpost.lat - box_deg,
-            outpost.lat + box_deg,
-            outpost.lon - box_deg,
-            outpost.lon + box_deg,
-        ),
-    ).fetchall()
+def flash_arrays(flashes):
+    """lat/lon/time as numpy arrays, for vectorized fingerprint building.
+
+    Loaded once and reused across every candidate the solver tries, instead
+    of round-tripping through SQLite per candidate.
+    """
+    lat = np.fromiter((f.lat for f in flashes), dtype=np.float64, count=len(flashes))
+    lon = np.fromiter((f.lon for f in flashes), dtype=np.float64, count=len(flashes))
+    time = np.fromiter((f.time for f in flashes), dtype=np.float64, count=len(flashes))
+    return lat, lon, time
+
+
+def build_index(lat, lon):
+    """KD-tree over flash coordinates, so a candidate's nearby-flash lookup
+    touches only nearby flashes instead of scanning the whole (global)
+    flash array on every call.
+    """
+    from scipy.spatial import cKDTree
+
+    return cKDTree(np.column_stack((lat, lon)))
