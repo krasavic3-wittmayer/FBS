@@ -11,11 +11,17 @@ be tried too, not just the one location.
 
 import numpy as np
 
-from fingerprint import build_fingerprints, similarity
+from fingerprint import build_fingerprints, similarity, sliding_fingerprints
 from models import Outpost
 
 
-def estimate_outpost(lat, lon, time, tree, recorded_fingerprint, refine_step=0.02, refine_radius=0.3, coarse_k=20, debug_fn=None):
+def estimate_outpost(lat, lon, time, tree, recorded_fingerprint, duration_s=None, refine_step=0.02, refine_radius=0.3, coarse_k=20, debug_fn=None):
+    """duration_s: the recording's actual length, if it's a short slice of
+    a longer storm (real audio). None means the recorded_fingerprint covers
+    a whole burst (the synthetic random-outpost path) — with a duration_s,
+    every plausible within-burst window is tried instead of just the whole
+    burst, since a short recording's offset into its storm is unknown.
+    """
     # Coarse pass: probe near actual flash clusters, since the true outpost
     # must sit within range of real activity.
     #
@@ -24,7 +30,7 @@ def estimate_outpost(lat, lon, time, tree, recorded_fingerprint, refine_step=0.0
     # not the true outpost's cell. Keep the top-k anchors and refine all of
     # them, instead of committing to just the single best one.
     anchors = np.unique(np.round(np.stack([lat, lon], axis=1), 1), axis=0)
-    coarse_top = _top_k(lat, lon, time, tree, recorded_fingerprint, anchors, coarse_k, min_separation_deg=2 * refine_radius)
+    coarse_top = _top_k(lat, lon, time, tree, recorded_fingerprint, anchors, coarse_k, min_separation_deg=2 * refine_radius, duration_s=duration_s)
     if debug_fn:
         debug_fn(
             f"estimate_outpost: coarse anchors={len(anchors)} top_k={coarse_k} "
@@ -36,7 +42,7 @@ def estimate_outpost(lat, lon, time, tree, recorded_fingerprint, refine_step=0.0
     fine_best, fine_burst, fine_score = None, (None, None), -1.0
     for coarse_outpost, _, _ in coarse_top:
         fine_candidates = _grid(coarse_outpost, refine_step, refine_radius)
-        candidate_best, candidate_burst, candidate_score = _best_of(lat, lon, time, tree, recorded_fingerprint, fine_candidates)
+        candidate_best, candidate_burst, candidate_score = _best_of(lat, lon, time, tree, recorded_fingerprint, fine_candidates, duration_s=duration_s)
         if candidate_score > fine_score:
             fine_best, fine_burst, fine_score = candidate_best, candidate_burst, candidate_score
 
@@ -60,12 +66,18 @@ def _grid(center, step, radius):
     return candidates
 
 
-def _best_burst(lat, lon, time, tree, recorded_fingerprint, candidate):
-    """Best-scoring time-burst for one candidate location."""
+def _best_burst(lat, lon, time, tree, recorded_fingerprint, candidate, duration_s=None):
+    """Best-scoring time-burst (or within-burst window, if duration_s is
+    given) for one candidate location."""
     best_score = -1.0
     best_burst = (None, None)
 
-    for fingerprint, burst_start, burst_end in build_fingerprints(candidate, lat, lon, time, tree=tree):
+    if duration_s is None:
+        matches = build_fingerprints(candidate, lat, lon, time, tree=tree)
+    else:
+        matches = sliding_fingerprints(candidate, lat, lon, time, duration_s, tree=tree)
+
+    for fingerprint, burst_start, burst_end in matches:
         score = similarity(recorded_fingerprint, fingerprint)
         if score > best_score:
             best_score = score
@@ -74,14 +86,14 @@ def _best_burst(lat, lon, time, tree, recorded_fingerprint, candidate):
     return best_score, best_burst
 
 
-def _best_of(lat, lon, time, tree, recorded_fingerprint, candidates):
+def _best_of(lat, lon, time, tree, recorded_fingerprint, candidates, duration_s=None):
     best_score = -1.0
     best_outpost = None
     best_burst = (None, None)
 
     for clat, clon in candidates:
         candidate = Outpost(clat, clon)
-        score, burst = _best_burst(lat, lon, time, tree, recorded_fingerprint, candidate)
+        score, burst = _best_burst(lat, lon, time, tree, recorded_fingerprint, candidate, duration_s=duration_s)
 
         if score > best_score:
             best_score = score
@@ -91,7 +103,7 @@ def _best_of(lat, lon, time, tree, recorded_fingerprint, candidates):
     return best_outpost, best_burst, best_score
 
 
-def _top_k(lat, lon, time, tree, recorded_fingerprint, candidates, k, min_separation_deg):
+def _top_k(lat, lon, time, tree, recorded_fingerprint, candidates, k, min_separation_deg, duration_s=None):
     """Best-scoring candidates, skipping ones too close to an already-picked one.
 
     Without this, nearby coarse anchors that describe the same physical spot
@@ -102,7 +114,7 @@ def _top_k(lat, lon, time, tree, recorded_fingerprint, candidates, k, min_separa
     scored = []
     for clat, clon in candidates:
         candidate = Outpost(clat, clon)
-        score, burst = _best_burst(lat, lon, time, tree, recorded_fingerprint, candidate)
+        score, burst = _best_burst(lat, lon, time, tree, recorded_fingerprint, candidate, duration_s=duration_s)
         scored.append((candidate, burst, score))
 
     scored.sort(key=lambda entry: entry[2], reverse=True)
