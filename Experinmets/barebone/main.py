@@ -97,13 +97,28 @@ def run_from_audio(path):
         print("No flash events detected — nothing to localize.")
         return
 
-    recorded_fingerprint = bin_events(times, amplitudes)
+    recorded_fingerprint = bin_events(times, amplitudes, window_s=duration_s)
     debug(f"fingerprint nonzero_bins={int((recorded_fingerprint != 0).sum())}")
 
-    # Matching this fingerprint against candidate outposts needs the real
-    # flash database (lightningmaps.org) this recording corresponds to —
-    # not wired up yet.
-    print("Detection complete. Matching against a real flash database not wired up yet.")
+    # No real flash database wired up yet (lightningmaps.org integration
+    # is still pending) — matches against a freshly generated synthetic
+    # one, so the result is illustrative only, not a real localization.
+    print("No real flash database wired up yet — generating a synthetic one to match against.")
+    storms = generate_storms(24 * 60, 5)
+    storm_radius_km = random.uniform(5, 20)
+    flashes = generate_flashes(storms, storm_radius_km)
+    lat, lon, flash_time = flash_arrays(flashes)
+    tree = build_index(lat, lon)
+
+    calculated_outpost, calc_burst_start, calc_burst_end = estimate_outpost(
+        lat, lon, flash_time, tree, recorded_fingerprint, duration_s=duration_s, debug_fn=debug
+    )
+    if calculated_outpost is None:
+        print("Could not localize — no matching pattern found.")
+        return
+
+    print(f"Predicted location: lat={calculated_outpost.lat:.4f}, lon={calculated_outpost.lon:.4f}")
+    print(f"Predicted recording window: {calc_burst_start:.1f}s - {calc_burst_end:.1f}s (arbitrary reference clock)")
 
 
 if __name__ == "__main__":

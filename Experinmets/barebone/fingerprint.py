@@ -1,9 +1,68 @@
 import numpy as np
+from numba import njit
 
 from physics import MAX_DISTANCE_M, SPEED_OF_SOUND
 
 
-def nearby_bursts(outpost, lat, lon, time, tree=None, max_distance_km=16, min_flashes=1, burst_gap_s=3 * 3600):
+@njit(cache=True)
+def _score_burst_windows(arrival_sorted, amplitude_sorted, recorded_fingerprint, recorded_norm, duration_s, bins, min_flashes):
+    """Best-scoring window start within one burst, JIT-compiled.
+
+    Plain nested loops instead of a vectorized numpy batch — the numpy
+    version (repeat/cumsum/bincount/norm, one round of small array ops per
+    burst) paid real Python-level call overhead across the ~54k bursts a
+    coarse-search pass touches; a batched-tensor rewrite to avoid that
+    overhead hit a different wall (O(anchors * burst_size^2) memory blew
+    up on dense storms). A compiled loop avoids both: no per-call numpy
+    dispatch overhead (it's one compiled function call per burst) and no
+    large intermediate arrays (the inner loop breaks as soon as it walks
+    past duration_s, so cost is O(events actually in each window), same
+    early-exit the searchsorted version relied on).
+
+    Returns (best_score, best_start_index); best_start_index is -1 if no
+    window had at least min_flashes events.
+    """
+    n = arrival_sorted.shape[0]
+    best_score = -1.0
+    best_start_index = -1
+    fingerprint = np.zeros(bins)
+
+    for i in range(n):
+        for b in range(bins):
+            fingerprint[b] = 0.0
+
+        start_t = arrival_sorted[i]
+        count = 0
+        j = i
+        while j < n and (arrival_sorted[j] - start_t) < duration_s:
+            bin_index = int((arrival_sorted[j] - start_t) / duration_s * bins)
+            if bin_index >= bins:
+                bin_index = bins - 1
+            fingerprint[bin_index] += amplitude_sorted[j]
+            count += 1
+            j += 1
+
+        if count < min_flashes:
+            continue
+
+        norm_sq = 0.0
+        dot = 0.0
+        for b in range(bins):
+            norm_sq += fingerprint[b] * fingerprint[b]
+            dot += fingerprint[b] * recorded_fingerprint[b]
+        norm = np.sqrt(norm_sq)
+        if norm == 0.0:
+            continue
+
+        score = dot / (norm * recorded_norm)
+        if score > best_score:
+            best_score = score
+            best_start_index = i
+
+    return best_score, best_start_index
+
+
+def nearby_bursts(outpost, lat, lon, time, tree=None, idx=None, max_distance_km=16, min_flashes=1, burst_gap_s=3 * 3600):
     """Raw (unbinned) nearby-flash events for a candidate location, split
     into distinct time-bursts.
 
@@ -14,10 +73,18 @@ def nearby_bursts(outpost, lat, lon, time, tree=None, max_distance_km=16, min_fl
     unknown as its location, so every plausible burst near a candidate has
     to be considered separately.
 
+    idx: precomputed KD-tree neighbor indices for this outpost, if the
+    caller already batch-queried the tree for many outposts at once (a
+    single query_ball_point call per outpost is expensive at scale — tens
+    of thousands of coarse-search candidates each paying Python call
+    overhead). Skips the tree query below when given.
+
     Returns a list of (emission_time, arrival_time, amplitude, burst_start, burst_end),
     each already sorted by emission_time within the burst.
     """
-    if tree is not None:
+    if idx is not None:
+        lat, lon, time = lat[idx], lon[idx], time[idx]
+    elif tree is not None:
         # KD-tree prefilter: only touches flashes near this candidate,
         # instead of scanning the whole (global) flash array every call.
         query_radius_deg = max_distance_km / 111 * 1.5
@@ -81,7 +148,7 @@ def nearby_bursts(outpost, lat, lon, time, tree=None, max_distance_km=16, min_fl
 MAX_BURST_WINDOW_S = 9500
 
 
-def build_fingerprints(outpost, lat, lon, time, tree=None, max_distance_km=16, bins=200, window_s=MAX_BURST_WINDOW_S,
+def build_fingerprints(outpost, lat, lon, time, tree=None, idx=None, max_distance_km=16, bins=200, window_s=MAX_BURST_WINDOW_S,
                         min_flashes=1, burst_gap_s=3 * 3600):
     """Whole-burst fingerprints for a candidate location, one per distinct
     time-burst — the entire burst is treated as one recording.
@@ -103,7 +170,7 @@ def build_fingerprints(outpost, lat, lon, time, tree=None, max_distance_km=16, b
     """
     fingerprints = []
     for _, arrival_time, amplitude, burst_start, burst_end in nearby_bursts(
-        outpost, lat, lon, time, tree, max_distance_km, min_flashes, burst_gap_s
+        outpost, lat, lon, time, tree=tree, idx=idx, max_distance_km=max_distance_km, min_flashes=min_flashes, burst_gap_s=burst_gap_s
     ):
         fingerprint = bin_events(arrival_time, amplitude, bins, window_s=window_s)
         fingerprints.append((fingerprint, burst_start, burst_end))
@@ -129,7 +196,7 @@ def sliding_fingerprints(outpost, lat, lon, time, duration_s, tree=None, max_dis
     """
     results = []
     for _, arrival_time, amplitude, _, _ in nearby_bursts(
-        outpost, lat, lon, time, tree, max_distance_km, min_flashes, burst_gap_s
+        outpost, lat, lon, time, tree=tree, max_distance_km=max_distance_km, min_flashes=min_flashes, burst_gap_s=burst_gap_s
     ):
         order = np.argsort(arrival_time)
         arrival_sorted = arrival_time[order]
@@ -148,6 +215,44 @@ def sliding_fingerprints(outpost, lat, lon, time, duration_s, tree=None, max_dis
             results.append((fingerprint, window_start, window_start + duration_s))
 
     return results
+
+
+def best_sliding_match(outpost, lat, lon, time, recorded_fingerprint, duration_s, tree=None, idx=None, max_distance_km=16,
+                        bins=200, min_flashes=1, burst_gap_s=3 * 3600):
+    """Best-scoring within-burst window for one candidate, scored against
+    recorded_fingerprint. The actual per-window search is JIT-compiled
+    (_score_burst_windows) — see its docstring for why.
+
+    idx: precomputed KD-tree neighbor indices for this outpost — see
+    nearby_bursts. Lets a caller scoring many outposts batch the tree query
+    once instead of paying Python call overhead per outpost.
+
+    Returns (best_score, window_start, window_end).
+    """
+    best_score = -1.0
+    best_window = (None, None)
+
+    recorded_norm = np.linalg.norm(recorded_fingerprint) if recorded_fingerprint is not None else 0.0
+    if recorded_norm == 0.0:
+        return best_score, best_window
+
+    for _, arrival_time, amplitude, _, _ in nearby_bursts(
+        outpost, lat, lon, time, tree=tree, idx=idx, max_distance_km=max_distance_km,
+        min_flashes=min_flashes, burst_gap_s=burst_gap_s
+    ):
+        order = np.argsort(arrival_time)
+        arrival_sorted = arrival_time[order]
+        amplitude_sorted = amplitude[order]
+
+        score, start_index = _score_burst_windows(
+            arrival_sorted, amplitude_sorted, recorded_fingerprint, recorded_norm, duration_s, bins, min_flashes
+        )
+        if start_index >= 0 and score > best_score:
+            best_score = float(score)
+            window_start = float(arrival_sorted[start_index])
+            best_window = (window_start, window_start + duration_s)
+
+    return best_score, best_window
 
 
 def bin_events(arrival_time, amplitude, bins=200, window_s=1800):

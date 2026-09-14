@@ -11,11 +11,11 @@ be tried too, not just the one location.
 
 import numpy as np
 
-from fingerprint import build_fingerprints, similarity, sliding_fingerprints
+from fingerprint import best_sliding_match, build_fingerprints, similarity
 from models import Outpost
 
 
-def estimate_outpost(lat, lon, time, tree, recorded_fingerprint, duration_s=None, refine_step=0.02, refine_radius=0.3, coarse_k=20, debug_fn=None):
+def estimate_outpost(lat, lon, time, tree, recorded_fingerprint, duration_s=None, refine_step=0.02, refine_radius=0.3, coarse_k=20, coarse_grid_deg=0.01, debug_fn=None):
     """duration_s: the recording's actual length, if it's a short slice of
     a longer storm (real audio). None means the recorded_fingerprint covers
     a whole burst (the synthetic random-outpost path) — with a duration_s,
@@ -25,11 +25,14 @@ def estimate_outpost(lat, lon, time, tree, recorded_fingerprint, duration_s=None
     # Coarse pass: probe near actual flash clusters, since the true outpost
     # must sit within range of real activity.
     #
-    # similarity() decays to a noise floor within a few km, well inside the
-    # ~11km coarse anchor spacing, so the single best coarse anchor is often
-    # not the true outpost's cell. Keep the top-k anchors and refine all of
-    # them, instead of committing to just the single best one.
-    anchors = np.unique(np.round(np.stack([lat, lon], axis=1), 1), axis=0)
+    # similarity() decays sharply within ~1-3km of the true point (checked
+    # empirically) and sits at a noise floor beyond that — a coarser grid
+    # (0.02-0.1deg, ~2-11km) never actually samples the peak, so the true
+    # location's score there is indistinguishable from (or worse than) a
+    # spurious match elsewhere; widening top-k at that resolution doesn't
+    # help since the true anchor may rank in the hundreds, not the top-k.
+    # coarse_grid_deg must be fine enough to land inside the peak.
+    anchors = _coarse_anchors(lat, lon, coarse_grid_deg)
     coarse_top = _top_k(lat, lon, time, tree, recorded_fingerprint, anchors, coarse_k, min_separation_deg=2 * refine_radius, duration_s=duration_s)
     if debug_fn:
         debug_fn(
@@ -54,6 +57,30 @@ def estimate_outpost(lat, lon, time, tree, recorded_fingerprint, duration_s=None
     return fine_best, fine_burst[0], fine_burst[1]
 
 
+def _coarse_anchors(lat, lon, step, block_deg=0.1):
+    """A uniform step-spaced grid, covering only the block_deg blocks that
+    actually contain flash activity.
+
+    Rounding each individual flash's own coordinate to step (the previous
+    approach) looks like a uniform grid but isn't: it only places anchors
+    where flashes happen to sit, so sparse areas — exactly where a
+    low-flash-count recording comes from — get bigger gaps than step
+    implies (observed 2-4km gaps at step=0.01deg, ~1.1km, in sparse spots).
+    A real recording location isn't restricted to exact flash coordinates,
+    so anchors shouldn't be either: uniformly tile every populated block
+    instead, guaranteeing no gap larger than ~step everywhere activity
+    could plausibly be.
+    """
+    occupied_blocks = np.unique(np.round(np.stack([lat, lon], axis=1) / block_deg) * block_deg, axis=0)
+    offsets = np.arange(0, block_deg, step)
+
+    grid_lat, grid_lon = np.meshgrid(offsets, offsets, indexing="ij")
+    grid_offsets = np.stack([grid_lat.ravel(), grid_lon.ravel()], axis=1)
+
+    anchors = (occupied_blocks[:, None, :] - block_deg / 2 + grid_offsets[None, :, :]).reshape(-1, 2)
+    return np.unique(anchors, axis=0)
+
+
 def _grid(center, step, radius):
     candidates = []
     lat = center.lat - radius
@@ -66,18 +93,34 @@ def _grid(center, step, radius):
     return candidates
 
 
-def _best_burst(lat, lon, time, tree, recorded_fingerprint, candidate, duration_s=None):
+def _batch_query(tree, candidates, max_distance_km=16):
+    """KD-tree neighbor indices for every candidate in one call.
+
+    A single query_ball_point call per candidate is cheap on its own, but
+    tens of thousands of candidates each paying that Python call overhead
+    dominated runtime once the coarse grid got fine enough to be accurate
+    (profiling: ~14s of a ~28s solve was inside per-candidate calls, much
+    of it call overhead, not the underlying math). Batching the query
+    amortizes that overhead across all candidates at once.
+    """
+    if tree is None:
+        return [None] * len(candidates)
+    query_radius_deg = max_distance_km / 111 * 1.5
+    return tree.query_ball_point(np.asarray(candidates), r=query_radius_deg)
+
+
+def _best_burst(lat, lon, time, tree, recorded_fingerprint, candidate, duration_s=None, idx=None):
     """Best-scoring time-burst (or within-burst window, if duration_s is
     given) for one candidate location."""
+    if duration_s is not None:
+        # Vectorized: scores every window of every burst in one batched
+        # scatter+matmul instead of a Python loop over individual windows —
+        # that loop otherwise dominates runtime for sliding-window search.
+        return best_sliding_match(candidate, lat, lon, time, recorded_fingerprint, duration_s, tree=tree, idx=idx)
+
     best_score = -1.0
     best_burst = (None, None)
-
-    if duration_s is None:
-        matches = build_fingerprints(candidate, lat, lon, time, tree=tree)
-    else:
-        matches = sliding_fingerprints(candidate, lat, lon, time, duration_s, tree=tree)
-
-    for fingerprint, burst_start, burst_end in matches:
+    for fingerprint, burst_start, burst_end in build_fingerprints(candidate, lat, lon, time, tree=tree, idx=idx):
         score = similarity(recorded_fingerprint, fingerprint)
         if score > best_score:
             best_score = score
@@ -91,9 +134,10 @@ def _best_of(lat, lon, time, tree, recorded_fingerprint, candidates, duration_s=
     best_outpost = None
     best_burst = (None, None)
 
-    for clat, clon in candidates:
+    idx_per_candidate = _batch_query(tree, candidates)
+    for (clat, clon), idx in zip(candidates, idx_per_candidate):
         candidate = Outpost(clat, clon)
-        score, burst = _best_burst(lat, lon, time, tree, recorded_fingerprint, candidate, duration_s=duration_s)
+        score, burst = _best_burst(lat, lon, time, tree, recorded_fingerprint, candidate, duration_s=duration_s, idx=idx)
 
         if score > best_score:
             best_score = score
@@ -112,9 +156,10 @@ def _top_k(lat, lon, time, tree, recorded_fingerprint, candidates, k, min_separa
     it would have found.
     """
     scored = []
-    for clat, clon in candidates:
+    idx_per_candidate = _batch_query(tree, candidates)
+    for (clat, clon), idx in zip(candidates, idx_per_candidate):
         candidate = Outpost(clat, clon)
-        score, burst = _best_burst(lat, lon, time, tree, recorded_fingerprint, candidate, duration_s=duration_s)
+        score, burst = _best_burst(lat, lon, time, tree, recorded_fingerprint, candidate, duration_s=duration_s, idx=idx)
         scored.append((candidate, burst, score))
 
     scored.sort(key=lambda entry: entry[2], reverse=True)
