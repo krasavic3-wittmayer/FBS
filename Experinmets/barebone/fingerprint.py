@@ -191,8 +191,11 @@ def sliding_fingerprints(outpost, lat, lon, time, duration_s, tree=None, max_dis
     recording's first event must be one of the real events, so this covers
     every plausible alignment without guessing a slide step).
 
-    Returns a list of (fingerprint, window_start, window_end), all in
-    arrival-time terms.
+    Returns a list of (fingerprint, candidate_window_start, candidate_window_end),
+    all in arrival-time terms. These are the solver's own *guesses* at where
+    the recording might sit within this burst — not ground truth (the
+    solver never sees or receives the recording's true start time; a
+    candidate here is just one of many hypotheses being scored).
     """
     results = []
     for _, arrival_time, amplitude, _, _ in nearby_bursts(
@@ -210,9 +213,9 @@ def sliding_fingerprints(outpost, lat, lon, time, duration_s, tree=None, max_dis
         for i, j in enumerate(end_idx):
             if j - i < min_flashes:
                 continue
-            window_start = arrival_sorted[i]
+            candidate_window_start = arrival_sorted[i]
             fingerprint = bin_events(arrival_sorted[i:j], amplitude_sorted[i:j], bins, window_s=duration_s)
-            results.append((fingerprint, window_start, window_start + duration_s))
+            results.append((fingerprint, candidate_window_start, candidate_window_start + duration_s))
 
     return results
 
@@ -227,7 +230,14 @@ def best_sliding_match(outpost, lat, lon, time, recorded_fingerprint, duration_s
     nearby_bursts. Lets a caller scoring many outposts batch the tree query
     once instead of paying Python call overhead per outpost.
 
-    Returns (best_score, window_start, window_end).
+    recorded_fingerprint is the only information this function has about
+    the actual recording — built entirely from detected/synthetic events
+    upstream of this call. Nothing here ever receives the recording's true
+    time or location; every window_start below is a hypothesis generated
+    from the known flash database (arrival_sorted), scored against that
+    fingerprint, and returned only if it won.
+
+    Returns (best_score, matched_window_start, matched_window_end).
     """
     best_score = -1.0
     best_window = (None, None)
@@ -249,8 +259,8 @@ def best_sliding_match(outpost, lat, lon, time, recorded_fingerprint, duration_s
         )
         if start_index >= 0 and score > best_score:
             best_score = float(score)
-            window_start = float(arrival_sorted[start_index])
-            best_window = (window_start, window_start + duration_s)
+            matched_window_start = float(arrival_sorted[start_index])
+            best_window = (matched_window_start, matched_window_start + duration_s)
 
     return best_score, best_window
 

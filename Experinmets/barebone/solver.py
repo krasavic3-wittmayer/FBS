@@ -57,6 +57,26 @@ def estimate_outpost(lat, lon, time, tree, recorded_fingerprint, duration_s=None
     return fine_best, fine_burst[0], fine_burst[1]
 
 
+def score_region(lat, lon, time, tree, recorded_fingerprint, center, duration_s=None, step=0.02, radius=0.3):
+    """Similarity score at every point of a local grid around center — for
+    visualization (a confidence heatmap), not used by estimate_outpost
+    itself. Same grid spacing as the solver's own fine pass, so this shows
+    exactly the resolution the answer was actually found at.
+
+    Returns a list of (lat, lon, score).
+    """
+    candidates = _grid(center, step, radius)
+    idx_per_candidate = _batch_query(tree, candidates)
+
+    points = []
+    for (clat, clon), idx in zip(candidates, idx_per_candidate):
+        candidate = Outpost(clat, clon)
+        score, _ = _best_burst(lat, lon, time, tree, recorded_fingerprint, candidate, duration_s=duration_s, idx=idx)
+        points.append((clat, clon, score))
+
+    return points
+
+
 def _coarse_anchors(lat, lon, step, block_deg=0.1):
     """A uniform step-spaced grid, covering only the block_deg blocks that
     actually contain flash activity.
