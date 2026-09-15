@@ -1,0 +1,15 @@
+[project]
+name = "fbs"
+version = "0.1.0"
+description = "FBS — Find By Storm: acoustic thunderstorm localization research"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+dependencies = [
+    "numpy",
+    "scipy",
+    "numba",
+    "customtkinter",
+    "tkintermapview",
+    "websockets",
+]
