@@ -3,7 +3,7 @@ from pathlib import Path
 
 from models import Flash
 
-DB_PATH = Path(__file__).parent / "live_flashes.db"
+DB_PATH = Path(__file__).parent.parent / "Data" / "RealData" / "live_flashes.db"
 
 
 def open_db(path=DB_PATH):
@@ -12,6 +12,8 @@ def open_db(path=DB_PATH):
     Never wipes existing rows — the logger runs indefinitely across many
     restarts and each real strike is only ever observed once.
     """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path)
     conn.execute(
         """

@@ -1,6 +1,6 @@
-"""Live lightning-strike logger. Standalone app — no dependency on
-anything outside this directory (run it even with the rest of the FBS
-repo deleted).
+"""Live lightning-strike logger. Standalone app logic-wise (no imports
+outside this directory); writes to ../Data/RealData/live_flashes.db so
+other FBS tools can find it, so it does need the repo root to exist.
 
 Connects to blitzortung.org's public websocket feed — the same feed
 lightningmaps.org's own live map uses (lightningmaps.org has no separate
@@ -33,6 +33,14 @@ WS_SERVERS = ["ws1.blitzortung.org", "ws2.blitzortung.org", "ws7.blitzortung.org
 SUBSCRIBE_MSG = '{"a":111}'
 
 
+def format_elapsed(seconds):
+    total_ms = int(seconds * 1000)
+    h, rem_ms = divmod(total_ms, 3600_000)
+    m, rem_ms = divmod(rem_ms, 60_000)
+    s, ms = divmod(rem_ms, 1000)
+    return f"{h}h{m:02d}m{s:02d}s{ms:03d}ms" if h else f"{m}m{s:02d}s{ms:03d}ms"
+
+
 def lzw_decode(data):
     """Python port of blitzortung's own decode() (JS/lbr.js) — a classic
     LZW variant where dictionary codes are embedded as characters with
@@ -61,7 +69,8 @@ def lzw_decode(data):
 async def listen(conn, server, batch_size=20, flush_interval_s=5.0):
     uri = f"wss://{server}"
     buffer = []
-    last_flush = time.monotonic()
+    start = time.monotonic()
+    last_flush = start
     total = 0
 
     async with websockets.connect(uri, open_timeout=10) as ws:
@@ -85,7 +94,8 @@ async def listen(conn, server, batch_size=20, flush_interval_s=5.0):
             if len(buffer) >= batch_size or now - last_flush >= flush_interval_s:
                 insert_flashes(conn, buffer)
                 total += len(buffer)
-                print(f"logged {len(buffer)} strikes ({total} this run)")
+                elapsed_s = now - start
+                print(f"logged {len(buffer)} strikes ({total} in {format_elapsed(elapsed_s)})")
                 buffer.clear()
                 last_flush = now
 

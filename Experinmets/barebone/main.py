@@ -131,7 +131,7 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--audio", type=str, default=None, help="Audio file to import (skips the menu)")
-    parser.add_argument("--db", type=str, default=None, help="Flash SQLite db to match against (e.g. logger/live_flashes.db); omit for synthetic test data")
+    parser.add_argument("--db", type=str, default=None, help="Flash SQLite db to match against (e.g. Data/RealData/live_flashes.db); omit for synthetic test data")
     args = parser.parse_args()
 
     DEBUG = args.debug

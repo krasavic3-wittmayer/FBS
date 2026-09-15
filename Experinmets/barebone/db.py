@@ -33,7 +33,7 @@ def create_db(flashes, path=DB_PATH):
 def load_flashes_db(path):
     """Loads every flash from an existing SQLite db built on the same
     flashes(lat, lon, time) schema as create_db — either a create_db
-    dump or a logger's live_flashes.db (see ../../logger), so real
+    dump or a logger's live_flashes.db (see ../../Data/RealData), so real
     logged data drops in with no format translation.
     """
     from models import Flash
