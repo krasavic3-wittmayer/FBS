@@ -3,7 +3,7 @@ import random
 import sys
 
 from audio_input import load_audio
-from db import build_index, create_db, flash_arrays
+from db import build_index, create_db, flash_arrays, load_flashes_db
 from fingerprint import bin_events, build_fingerprints
 from flash_detect import detect_flashes
 from generate import generate_flashes, generate_storms
@@ -82,7 +82,7 @@ def main(seed=None):
     return error_km
 
 
-def run_from_audio(path):
+def run_from_audio(path, db_path=None):
     samples, sample_rate = load_audio(path)
     duration_s = len(samples) / sample_rate
     print(f"Loaded audio: {path}")
@@ -100,13 +100,18 @@ def run_from_audio(path):
     recorded_fingerprint = bin_events(times, amplitudes, window_s=duration_s)
     debug(f"fingerprint nonzero_bins={int((recorded_fingerprint != 0).sum())}")
 
-    # No real flash database wired up yet (lightningmaps.org integration
-    # is still pending) — matches against a freshly generated synthetic
-    # one, so the result is illustrative only, not a real localization.
-    print("No real flash database wired up yet — generating a synthetic one to match against.")
-    storms = generate_storms(24 * 60, 5)
-    storm_radius_km = random.uniform(5, 20)
-    flashes = generate_flashes(storms, storm_radius_km)
+    flashes = load_flashes_db(db_path) if db_path else []
+    if db_path and not flashes:
+        print(f"Flash database is empty: {db_path} — falling back to synthetic data.")
+
+    if flashes:
+        print(f"Matching against flash database: {db_path} ({len(flashes)} flashes)")
+    else:
+        print("No flash database given — generating a synthetic one to match against.")
+        storms = generate_storms(24 * 60, 5)
+        storm_radius_km = random.uniform(5, 20)
+        flashes = generate_flashes(storms, storm_radius_km)
+
     lat, lon, flash_time = flash_arrays(flashes)
     tree = build_index(lat, lon)
 
@@ -126,15 +131,18 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--audio", type=str, default=None, help="Audio file to import (skips the menu)")
+    parser.add_argument("--db", type=str, default=None, help="Flash SQLite db to match against (e.g. logger/live_flashes.db); omit for synthetic test data")
     args = parser.parse_args()
 
     DEBUG = args.debug
 
     if args.audio:
-        run_from_audio(args.audio)
+        run_from_audio(args.audio, db_path=args.db)
     else:
         choice = input("1) Import audio\n2) Random outpost\n> ").strip()
         if choice == "1":
-            run_from_audio(input("Audio file path: ").strip())
+            audio_path = input("Audio file path: ").strip()
+            db_path = args.db or input("Flash database path (blank for synthetic): ").strip() or None
+            run_from_audio(audio_path, db_path=db_path)
         else:
             main(seed=args.seed)

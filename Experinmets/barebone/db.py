@@ -30,6 +30,22 @@ def create_db(flashes, path=DB_PATH):
     return conn
 
 
+def load_flashes_db(path):
+    """Loads every flash from an existing SQLite db built on the same
+    flashes(lat, lon, time) schema as create_db — either a create_db
+    dump or a logger's live_flashes.db (see ../../logger), so real
+    logged data drops in with no format translation.
+    """
+    from models import Flash
+
+    conn = sqlite3.connect(path)
+    try:
+        rows = conn.execute("SELECT lat, lon, time FROM flashes").fetchall()
+    finally:
+        conn.close()
+    return [Flash(lat, lon, time) for lat, lon, time in rows]
+
+
 def flash_arrays(flashes):
     """lat/lon/time as numpy arrays, for vectorized fingerprint building.
 

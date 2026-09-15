@@ -14,7 +14,7 @@ import customtkinter as ctk
 import tkintermapview
 
 from audio_input import load_audio
-from db import build_index, flash_arrays
+from db import build_index, flash_arrays, load_flashes_db
 from fingerprint import bin_events
 from flash_detect import detect_flashes
 from generate import generate_flashes, generate_storms
@@ -27,11 +27,16 @@ AUDIO_FILETYPES = [
     ("All files", "*.*"),
 ]
 
-# Heatmap grid is deliberately lighter than the solver's own fine pass
-# (step=0.02, radius=0.3 -> 961 cells) — this is purely for display, and
-# that many canvas polygons redrawn on every pan/zoom gets sluggish.
-HEATMAP_STEP_DEG = 0.02
-HEATMAP_RADIUS_DEG = 0.15
+DB_FILETYPES = [
+    ("SQLite database", "*.db"),
+    ("All files", "*.*"),
+]
+
+# ~100km-wide coverage (radius ~50km / 111km per degree), with a wider
+# cell size than the solver's own fine pass so the polygon count (and
+# canvas redraw cost on every pan/zoom) stays reasonable at that span.
+HEATMAP_STEP_DEG = 0.03
+HEATMAP_RADIUS_DEG = 0.45
 
 
 def score_to_color(t):
@@ -59,6 +64,8 @@ class App(ctk.CTk):
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
+        self.db_path = None
+
         self._build_sidebar()
         self._build_map()
 
@@ -70,7 +77,7 @@ class App(ctk.CTk):
     def _build_sidebar(self):
         sidebar = ctk.CTkFrame(self, width=300, corner_radius=0)
         sidebar.grid(row=0, column=0, sticky="nswe")
-        sidebar.grid_rowconfigure(5, weight=1)
+        sidebar.grid_rowconfigure(7, weight=1)
         sidebar.grid_propagate(False)
 
         ctk.CTkLabel(sidebar, text="FBS", font=ctk.CTkFont(size=28, weight="bold")).grid(
@@ -91,14 +98,35 @@ class App(ctk.CTk):
         )
         self.random_button.grid(row=3, column=0, padx=24, pady=6, sticky="ew")
 
+        self.db_button = ctk.CTkButton(
+            sidebar, text="Select Flash DB…", height=32, fg_color="transparent",
+            border_width=2, text_color=("gray10", "gray90"), command=self.on_select_db,
+        )
+        self.db_button.grid(row=4, column=0, padx=24, pady=(14, 2), sticky="ew")
+
+        self.db_label_var = ctk.StringVar(value=self._db_label())
+        ctk.CTkLabel(sidebar, textvariable=self.db_label_var, text_color="gray60", anchor="w", wraplength=252).grid(
+            row=5, column=0, padx=24, pady=(0, 6), sticky="ew"
+        )
+
         self.status_var = ctk.StringVar(value="Ready.")
         ctk.CTkLabel(sidebar, textvariable=self.status_var, text_color="gray60", anchor="w").grid(
-            row=4, column=0, padx=24, pady=(14, 6), sticky="ew"
+            row=6, column=0, padx=24, pady=(8, 6), sticky="ew"
         )
 
         self.output = ctk.CTkTextbox(sidebar, font=("Courier", 11), corner_radius=8)
-        self.output.grid(row=5, column=0, padx=24, pady=(0, 24), sticky="nswe")
+        self.output.grid(row=7, column=0, padx=24, pady=(0, 24), sticky="nswe")
         self.output.configure(state="disabled")
+
+    def _db_label(self):
+        return f"DB: {self.db_path}" if self.db_path else "DB: none selected (synthetic data)"
+
+    def on_select_db(self):
+        path = ctk.filedialog.askopenfilename(title="Select flash database", filetypes=DB_FILETYPES)
+        if not path:
+            return
+        self.db_path = path
+        self.db_label_var.set(self._db_label())
 
     def _build_map(self):
         self.map_widget = tkintermapview.TkinterMapView(self, corner_radius=0)
@@ -168,7 +196,7 @@ class App(ctk.CTk):
                 self.draw_marker(lat, lon, text, circle_color, outside_color)
             if markers:
                 self.map_widget.set_position(markers[-1][0], markers[-1][1])
-                self.map_widget.set_zoom(11)
+                self.map_widget.set_zoom(10)  # wide enough to fit the ~100km heatmap span
         self.after(0, _apply)
 
     # -- Import audio --
@@ -196,10 +224,20 @@ class App(ctk.CTk):
 
             recorded_fingerprint = bin_events(times, amplitudes, window_s=duration_s)
 
-            self.log_from_worker("Generating reference flash data (synthetic — no real database wired up yet)…")
-            storms = generate_storms(24 * 60, 5)
-            storm_radius_km = random.uniform(5, 20)
-            flashes = generate_flashes(storms, storm_radius_km)
+            db_path = self.db_path
+            flashes = load_flashes_db(db_path) if db_path else []
+            if db_path and not flashes:
+                self.log_from_worker(f"Flash database is empty: {db_path} — falling back to synthetic data.")
+                db_path = None
+
+            if flashes:
+                self.log_from_worker(f"Matching against flash database: {db_path} ({len(flashes)} flashes)")
+            else:
+                self.log_from_worker("No flash database selected — generating synthetic reference data…")
+                storms = generate_storms(24 * 60, 5)
+                storm_radius_km = random.uniform(5, 20)
+                flashes = generate_flashes(storms, storm_radius_km)
+
             lat, lon, flash_time = flash_arrays(flashes)
             tree = build_index(lat, lon)
 
